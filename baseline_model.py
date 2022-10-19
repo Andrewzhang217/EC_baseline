@@ -279,15 +279,25 @@ def generate_cigar_correct_error(overlap_map):
 
 
 def main(args):
-    # reads = get_reads(args.input)
 
     overlap_map = parse_paf(args.paf)
+
     print("finish parsing")
     workers = args.thread
     seq_lst = []
     futures_ec_reads = []
     overlap_keys = list(overlap_map)
     overlap_list = overlap_map.items()
+
+    file_type = Path(args.input).suffix
+    file_type = file_type[1:]
+    if file_type in ['fq']:
+        file_type = 'fastq'
+
+    # Keep the reads without overlaps 
+    for record in SeqIO.parse(args.input, file_type):
+        if record.id not in overlap_keys:
+            seq_lst.append(record)
     
     with ProcessPoolExecutor(max_workers=workers) as executor:
         # step = int(len(overlap_map) / workers)
