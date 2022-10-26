@@ -1,4 +1,5 @@
 from Bio import SeqIO
+import edlib
 
 from dataclasses import dataclass
 from collections import defaultdict
@@ -57,8 +58,7 @@ def get_reads(path: str) -> Dict[str, HAECSeqRecord]:
     print("size: ", len(read_records))
     return read_records
 
-
-def parse_paf(path: str) -> Dict[str, List[Overlap]]:
+def parse_paf(path: str, reads) -> Dict[str, List[Overlap]]:
     overlaps = defaultdict(list)
 
     with open(path, 'r') as f:
@@ -73,6 +73,49 @@ def parse_paf(path: str) -> Dict[str, List[Overlap]]:
             target_start = int(line[7])
             target_end = int(line[8])
 
+            overhang_threshold = 500
+            query_len = len(reads[query_name].seq)
+            target_len = len(reads[target_name].seq) 
+
+            query_left = query_start - 0
+            target_left = target_start - 0
+            if query_left > overhang_threshold and target_left > overhang_threshold:
+                if query_left < target_left:
+                    query_head = reads[query_name].seq[0:100]
+                    extend_start = target_start - query_left - 100
+                    extend_end = target_start - query_left + 200
+                    target_head = reads[target_name].seq[extend_start if extend_start > 0 else 0 : extend_end]
+                    align = edlib.align(query_head, target_head, mode='HW')
+                else :
+                    target_head = reads[target_name].seq[0:100]
+                    extend_start = query_start - target_left - 100
+                    extend_end = query_start - target_left + 200
+                    query_head = reads[query_name].seq[extend_start if extend_start > 0 else 0 : extend_end]
+                    align = edlib.align(target_head, query_head, mode='HW')
+                
+                edit_distance = align['editDistance']
+                if edit_distance > 15 :
+                    continue
+
+            query_right = query_len - query_end
+            target_right = target_len - target_end
+            if query_right > overhang_threshold and target_right > overhang_threshold:
+                if query_right < target_right:
+                    query_tail = reads[query_name].seq[query_len - 100:query_len]
+                    extend_start = target_end + query_right - 200
+                    extend_end = target_end + query_right + 100
+                    target_tail = reads[target_name].seq[extend_start: extend_end if extend_end < target_len else target_len]
+                    align = edlib.align(query_tail, target_tail, mode='HW')
+                else :
+                    target_tail = reads[target_name].seq[target_len - 100:target_len]
+                    extend_start = query_end + target_right - 200
+                    extend_end = query_end + target_right + 100
+                    query_tail = reads[query_name].seq[extend_start: extend_end if extend_end < query_len else query_len]
+                    align = edlib.align(target_tail, query_tail, mode='HW')
+                edit_distance = align['editDistance']
+                if edit_distance > 15 :
+                    continue    
+
             # Save target
             overlap = Overlap(query_name, query_start, query_end, target_name,
                               target_start, target_end, strand)
@@ -84,5 +127,4 @@ def parse_paf(path: str) -> Dict[str, List[Overlap]]:
             overlaps[query_name].append(overlap)
 
     # print('Before', len(overlaps['e012f204-6a49-4e82-884e-8138929a86c9_1']))
-
     return dict(overlaps)

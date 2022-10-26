@@ -275,7 +275,7 @@ def take_longest(
 
 
 def main(args):
-    overlaps = parse_paf(args.paf)
+    overlaps = parse_paf(args.paf, reads)
     # overlaps = take_longest(overlaps)
 
     print("finish parsing")
