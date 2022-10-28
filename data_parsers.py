@@ -73,6 +73,10 @@ def parse_paf(path: str) -> Dict[str, List[Overlap]]:
             target_start = int(line[7])
             target_end = int(line[8])
 
+            # remove self-overlap
+            if query_name == target_name:
+                continue
+
             # Save target
             overlap = Overlap(query_name, query_start, query_end, target_name,
                               target_start, target_end, strand)
@@ -84,5 +88,5 @@ def parse_paf(path: str) -> Dict[str, List[Overlap]]:
             overlaps[query_name].append(overlap)
 
     # print('Before', len(overlaps['e012f204-6a49-4e82-884e-8138929a86c9_1']))
-
+    print(len(overlaps))
     return dict(overlaps)
