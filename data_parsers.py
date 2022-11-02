@@ -60,7 +60,13 @@ def get_reads(path: str) -> Dict[str, HAECSeqRecord]:
 
 def parse_paf(path: str, reads) -> Dict[str, List[Overlap]]:
     overlaps = defaultdict(list)
-
+    counter = defaultdict(int)
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip().split('\t')
+            query_name = line[0]
+            counter[query_name] += 1
+    
     with open(path, 'r') as f:
         for line in f:
             line = line.strip().split('\t')
@@ -79,7 +85,7 @@ def parse_paf(path: str, reads) -> Dict[str, List[Overlap]]:
 
             query_left = query_start - 0
             target_left = target_start - 0
-            if query_left > overhang_threshold and target_left > overhang_threshold:
+            if counter[query_name] > 100 and query_left > overhang_threshold and target_left > overhang_threshold:
                 if query_left < target_left:
                     query_head = reads[query_name].seq[0:100]
                     extend_start = target_start - query_left - 100
@@ -99,7 +105,7 @@ def parse_paf(path: str, reads) -> Dict[str, List[Overlap]]:
 
             query_right = query_len - query_end
             target_right = target_len - target_end
-            if query_right > overhang_threshold and target_right > overhang_threshold:
+            if counter[query_name] > 100 and query_right > overhang_threshold and target_right > overhang_threshold:
                 if query_right < target_right:
                     query_tail = reads[query_name].seq[query_len - 100:query_len]
                     extend_start = target_end + query_right - 200
