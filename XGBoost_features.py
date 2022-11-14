@@ -33,7 +33,26 @@ encode = {
 }
 
 GAP_CODE = 4
-
+def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
+    print('Parsing inputs...')
+    time1 = time.time()
+    overlaps = parse_paf(paf_path)
+    # overlaps = take_longest(overlaps)
+    time2 = time.time()
+    print(f'Time taken for parsing paf: {time2-time1}')
+    covs = [len(olps) for olps in overlaps.values()]
+    covs.sort()
+    print('Median number of overlaps:', covs[len(covs) // 2])
+    
+    
+    
+    global reads, truth_reads
+    time3 = time.time()
+    reads = get_reads(reads_path)
+    truth_reads = get_reads(truth_path)
+    time4 = time.time()
+    print(f"Time taken for parsing reads: {time4-time3}")
+    return overlaps
 def calculate_iden(cigar):
     matches, mis, ins, dels = 0, 0, 0, 0
     for op, length in cigar:
@@ -66,12 +85,16 @@ class aux_data:
     def __repr__(self):
         return f'{self.tname} {self.num_pos}'
 
-
 '''
 Returns 
     1. a list of list of dictionaries, containing the counts of bases in each positions 
     2. aux_data for this target read
 '''
+def one_hot(i):
+    o = [0] * 5
+    o[i] = 1
+    return o
+
 def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
                   tovlps: List[Overlap]) -> list[list[dict[str, int]]]:
     # uncorrected
@@ -79,13 +102,13 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     # reads before error correction
     # seq_lst.append(reads[target_read])
     # print(len(uncorrected))
-
     # Add original base into frequency
     freq = []
     for i, base in enumerate(uncorrected):
         freq.append([])
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
+        #freq[i][0]['O'] = encode[base]
 
     # keep track of number of ins at each original position in uncorrected
     ins_counts = [0] * len(freq) 
@@ -96,6 +119,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     # temp_lst = []
     if len(tovlps) >= COV:
         tovlps.sort(key=lambda o: calculate_iden(o.cigar), reverse=True)
+        #tovlps.sort(key=lambda o: o.iden, reverse=True)
         temp_lst = tovlps[:COV]
     else:
         temp_lst = tovlps
@@ -110,7 +134,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
         # sr.name = reads[query_name].name
         # sr.description = reads[query_name].description
         # seq_lst.append(sr)
-        cnt = 0
+        #cnt = 0
         # reverse complement
         # recalculate the query start and end in case of RC
         # rc_start = len - end - 1
@@ -147,6 +171,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
                                       start=1):
                     if i == len(freq[target_tmp_pos]):
                         freq[target_tmp_pos].append(defaultdict(int))
+                        #freq[target_tmp_pos][i]['O'] = GAP_CODE
                         ins_counts[target_tmp_pos] += 1
                         total_num_pos += 1
                     freq[target_tmp_pos][i][b] += 1
@@ -177,6 +202,7 @@ def generate_cigar(overlaps: Dict[str, List[Overlap]],
                 continue
 
             cigar = calculate_path(overlap, reads[tname], reads[overlap.qname])
+            #overlap.cigar = calculate_iden(cigar)
             if cigar is not None:
                 overlap.cigar = cigar
                 count += 1
@@ -224,7 +250,7 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
 def fix_gap_count(dicts_for_pos):
     n_support = sum(dicts_for_pos[0].values())
     for i in range(1, len(dicts_for_pos)):
-        dicts_for_pos[i]['D'] = n_support - sum(dicts_for_pos[i].values())
+        dicts_for_pos[i]['D'] = n_support - sum(dicts_for_pos[i].values()) #+ dicts_for_pos[i]['O']
 
 def flatten_freq(freq):
     for dicts_for_pos in freq:
@@ -278,6 +304,21 @@ def ground_truth_for_read(aux : aux_data):
     align = edlib.align(truth_read, target_read, task='path')
     path = align['cigar']
     
+    ###
+    '''
+    nice = edlib.getNiceAlignment(align, truth_read, target_read)
+    tr_align = nice['query_aligned']
+    tg_align = nice['target_aligned']
+    m_align = nice['matched_aligned']
+    
+    for i in range(0, len(tr_align), 80):
+        print(tg_align[i:i+80])
+        print(m_align[i:i+80])
+        print(tr_align[i:i+80])
+    '''
+    
+    ###
+    
     generator = gen(path)
     cigar = list(generator)
     
@@ -304,7 +345,9 @@ def ground_truth_for_read(aux : aux_data):
             
         elif op == 'I':
             num_ins_pos_with_support = aux.ins_counts[uncorrected_idx-1]
+            #print(f'unc {uncorrected_idx}, num_ins_pos_with: {num_ins_pos_with_support}')
             if num_ins_pos_with_support == 0:
+                truth_idx += length
                 continue
             temp_list = [encode[base] for base in truth_read[truth_idx:truth_idx+min(length, num_ins_pos_with_support)]]
             
@@ -333,6 +376,18 @@ def generate_training_features(overlaps: Dict[str, List[Overlap]]):
     list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
     batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
     return batch_input_features, np.asarray(batch_ground_truth)
+
+'''
+batch_input_features: (n, 5) np array
+truth: (n, ) np array
+'''
+def debug_generate_training_features(overlaps: Dict[str, List[Overlap]]):
+    global reads
+    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
+    list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
+    batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
+    read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
+    return batch_input_features, np.asarray(batch_ground_truth), aux_data_list, read
 
 def take_longest(
         overlaps: Dict[str, List[Overlap]]) -> Dict[str, List[Overlap]]:
@@ -363,6 +418,8 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     covs.sort()
     print('Median number of overlaps:', covs[len(covs) // 2])
     
+    
+    
     global reads, truth_reads
     time3 = time.time()
     reads = get_reads(reads_path)
@@ -370,6 +427,7 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     time4 = time.time()
     print(f"Time taken for parsing reads: {time4-time3}")
     
+
     futures_input_features = []
     overlap_keys = list(overlaps)
     overlap_list = overlaps.items()

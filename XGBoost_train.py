@@ -52,7 +52,7 @@ def parse_args():
     parser.add_argument('-l',
                         '--limit',
                         type=int,
-                        help='number of target reads to use for training. -1 for all',
+                        help='number of target reads to use for training. -1 for all(which is default)',
                         default=-1)
     args = parser.parse_args()
     return args
