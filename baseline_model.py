@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import multiprocessing
 from time import time
 from Bio import SeqIO
@@ -15,8 +16,9 @@ from concurrent.futures import as_completed
 import itertools
 import re
 import sys
-
-from data_parsers import *
+from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps
+from sequences import *
+#from data_parsers import *
 
 from typing import *
 
@@ -276,6 +278,8 @@ def take_longest(
 
 def main(args):
     overlaps = parse_paf(args.paf)
+    overlaps = filter_primary_overlaps(overlaps)
+    extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
 
     print("finish parsing")

@@ -3,8 +3,9 @@ from Bio import SeqIO
 from dataclasses import dataclass
 from collections import defaultdict
 from pathlib import Path
-
+import edlib
 from typing import *
+#from align_info import align_info
 
 
 @dataclass
@@ -16,6 +17,7 @@ class HAECSeqRecord:
         self.id = id
         self.description = description
         self.seq = seq
+        #self.info = None 
 
     def reverse_complement(self,
                            start: Optional[int] = None,
@@ -39,9 +41,10 @@ class Overlap:
     tstart: int
     tend: int
     strand: str
+    #iden: float = None
     cigar: Optional[List[Tuple[str, int]]] = None
 
-
+# delete infos after this function 
 def get_reads(path: str) -> Dict[str, HAECSeqRecord]:
     file_type = Path(path).suffix
     file_type = file_type[1:]
@@ -50,10 +53,10 @@ def get_reads(path: str) -> Dict[str, HAECSeqRecord]:
 
     read_records = {}
     for record in SeqIO.parse(path, file_type):
-        read_records[record.id] = HAECSeqRecord(record.name, record.id,
-                                                record.description,
-                                                str(record.seq).upper())
-
+        record = HAECSeqRecord(record.name, record.id,
+                    record.description,
+                    str(record.seq).upper())
+        read_records[record.id] = record
     print("size: ", len(read_records))
     return read_records
 
@@ -72,6 +75,8 @@ def parse_paf(path: str) -> Dict[str, List[Overlap]]:
             target_name = line[5]
             target_start = int(line[7])
             target_end = int(line[8])
+
+           
 
             # remove self-overlap
             if query_name == target_name:

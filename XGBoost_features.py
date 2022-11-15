@@ -17,8 +17,9 @@ import re
 import sys
 from operator import itemgetter
 import numpy as np
-
-from data_parsers import *
+from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps
+from sequences import *
+#from data_parsers import *
 
 from typing import *
 
@@ -71,7 +72,7 @@ def calculate_iden(cigar):
 
 
 class aux_data:
-    def __init__(self, tname:str, ins_counts:list[int], num_pos:int):
+    def __init__(self, tname:str, ins_counts:List[int], num_pos:int):
         self.tname = tname
         
         # number of insertion slots at each position
@@ -82,19 +83,25 @@ class aux_data:
         # of the alignment to this target read
         self.num_pos = num_pos
         
+        
     def __repr__(self):
         return f'{self.tname} {self.num_pos}'
 
-'''
-Returns 
-    1. a list of list of dictionaries, containing the counts of bases in each positions 
-    2. aux_data for this target read
-'''
+
 def one_hot(i):
     o = [0] * 5
     o[i] = 1
     return o
 
+# returns a list with the original bases in each position (including ins pos) encoded 
+def get_original_bases(original, ins_counts):
+    list_of_lists=  [[encode[original[i]]] + count * [GAP_CODE] for i, count in enumerate(ins_counts)]
+    return [item for sublist in list_of_lists for item in sublist]
+'''
+Returns 
+    1. a list of list of dictionaries, containing the counts of bases in each positions 
+    2. aux_data for this target read
+'''
 def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
                   tovlps: List[Overlap]) -> list[list[dict[str, int]]]:
     # uncorrected
@@ -184,9 +191,10 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
         # assert target_pos == target_end and query_pos == query_end, f'{target_read}, {query_name}'
         # assert target_pos == target_end and query_pos == query_end, f'{path}'
     # generate consensus
-    return freq, aux_data(tname, ins_counts, total_num_pos)
     
-
+    return freq, aux_data(tname, ins_counts, total_num_pos), get_original_bases(uncorrected, ins_counts)
+    
+    
 
 def generate_cigar(overlaps: Dict[str, List[Overlap]],
                    reads: Dict[str, HAECSeqRecord]) -> None:
@@ -274,16 +282,19 @@ def generate_input_features(reads, overlaps: Dict[str, List[Overlap]]):
 
     freq_list = []
     aux_data_list = []
+    all_original_bases = []
     for tname, tovlps in overlaps.items():
         tovlps = [o for o in tovlps if o.cigar is not None]
-        freq, aux_data = get_bases_freq(reads, tname, tovlps)
+        freq, aux_data, original_bases = get_bases_freq(reads, tname, tovlps)
         aux_data_list.append(aux_data)
         freq_list += freq
+        all_original_bases += original_bases
     
     # from list of list of dict to list of dict
     # also fixes gap count for ins positions
     flattened_freq = flatten_freq(freq_list)
-    return np.asarray([get_bases_in_order(counts_dict) for counts_dict in flattened_freq]), aux_data_list
+    assert(len(all_original_bases) == len(flattened_freq))
+    return np.asarray([list(get_bases_in_order(counts_dict)) + one_hot(original_base) for counts_dict, original_base in zip(flattened_freq, all_original_bases)]), aux_data_list
 
 PATTERN = re.compile('(\d+)([=XID])')
 
@@ -411,6 +422,8 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     print('Parsing inputs...')
     time1 = time.time()
     overlaps = parse_paf(paf_path)
+    overlaps = filter_primary_overlaps(overlaps)
+    extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
     print(f'Time taken for parsing paf: {time2-time1}')
