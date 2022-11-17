@@ -148,6 +148,14 @@ def parse_args():
     parser.add_argument('--reuse', action='store_true', help='Reuse existing files.')
     return parser.parse_args()
 
+'''
+TODO filter the reads to only those with an alignment on the refs. 
+So that every read in the training set have an 'origin' on the genome defined.
+Also, maybe clip the reads to only the aligned portions...
+--> actually the tagged clipped reads already have them filtered, and the filtering 
+should not differ if the parameters etc are the same.
+'''
+
 def main():
     args = parse_args()
     

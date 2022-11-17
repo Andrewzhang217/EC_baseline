@@ -19,7 +19,7 @@ from operator import itemgetter
 import numpy as np
 from align_info import read_records
 
-from data_parsers_snps import *
+from data_parsers_snps import get_reads_snps,HAECSeqRecord, Overlap, parse_paf
 
 from typing import *
 
@@ -34,7 +34,7 @@ encode = {
 }
 
 GAP_CODE = 4
-def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
+def debug_overlaps(paf_path:str, reads_path:str, align_info_path:str):
     print('Parsing inputs...')
     time1 = time.time()
     overlaps = parse_paf(paf_path)
@@ -47,10 +47,10 @@ def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
     
     
     
-    global reads, truth_reads
+    global reads
     time3 = time.time()
-    reads = get_reads(reads_path)
-    truth_reads = get_reads(truth_path)
+    align_records = read_records(align_info_path)
+    reads = get_reads_snps(reads_path, align_records)
     time4 = time.time()
     print(f"Time taken for parsing reads: {time4-time3}")
     return overlaps
@@ -107,7 +107,7 @@ def count_freq_low_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
         freq.append([])
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
-    aux = aux_data(target_seq_record.id, [0] * len(freq), 0)
+    aux = aux_data(target_seq_record.id, [0] * len(freq), len(freq))
     for overlap in tovlps:
     
         target_pos = overlap.tstart
@@ -150,7 +150,7 @@ def count_freq_low_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
                 query_pos += length
             else:
                 raise ValueError(f'{operation} - Invalid CIGAR operation.')
-        return freq, aux, [[defaultdict(int)] * len(sublist) for sublist in freq]
+    return freq, aux, freq
 def count_freq_high_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
                       target_seq_record):
             # freq of A C G T and D at each base
@@ -161,7 +161,8 @@ def count_freq_high_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
     fp_freq = [[defaultdict(int)] for ls in freq]
-    aux = aux_data(target_seq_record.id, [0] * len(freq), 0)
+    aux = aux_data(target_seq_record.id, [0] * len(freq), len(freq))
+    #print(f'num here {len(tovlps)}')
     for overlap in tovlps:
         
         target_pos = overlap.tstart
@@ -178,9 +179,10 @@ def count_freq_high_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
             if operation == '=' or operation == 'X':
                 for i, b in enumerate(query_read[query_pos:query_pos + length]):
                     freq[target_pos + i][0][b] += 1
+                    #print('HI')
                     if is_fp:
                         fp_freq[target_pos + i][0][b] += 1
-
+                #print('-----------')
                 target_pos += length
                 query_pos += length
             elif operation == 'D':
@@ -196,16 +198,21 @@ def count_freq_high_fp(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
                     if i == len(freq[target_tmp_pos]):
                         freq[target_tmp_pos].append(defaultdict(int))
                         #freq[target_tmp_pos][i]['O'] = GAP_CODE
-                        if is_fp:
-                            fp_freq[target_tmp_pos].append(defaultdict(int))
+                        
+                        fp_freq[target_tmp_pos].append(defaultdict(int))
                         aux.ins_counts[target_tmp_pos] += 1
                         aux.num_pos += 1
                     freq[target_tmp_pos][i][b] += 1
+                    if is_fp:
+                        fp_freq[target_tmp_pos][i][b] += 1    
 
                 query_pos += length
             else:
                 raise ValueError(f'{operation} - Invalid CIGAR operation.')
-        return freq, aux, fp_freq
+        #for f in freq[100]:
+        #    print(f)
+        #print('-------')
+    return freq, aux, fp_freq
 def count_freq(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
                       target_seq_record):
         # freq of A C G T and D at each base
@@ -215,7 +222,7 @@ def count_freq(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
         freq.append([])
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
-    aux = aux_data(target_seq_record.id, [0] * len(freq), 0)
+    aux = aux_data(target_seq_record.id, [0] * len(freq), len(freq))
     for overlap in tovlps:
     
         target_pos = overlap.tstart
@@ -258,7 +265,7 @@ def count_freq(reads: Dict[str, HAECSeqRecord], tovlps: List[Overlap],
                 query_pos += length
             else:
                 raise ValueError(f'{operation} - Invalid CIGAR operation.')
-        return freq, aux, None
+    return freq, aux, None
 def num_fp_gt(tovlps: List[Overlap], num:int, target_seq_record:HAECSeqRecord):
     count = 0
     for overlap in tovlps:
@@ -289,9 +296,12 @@ def get_bases_freq_snps(reads: Dict[str, HAECSeqRecord], tname: str,
     
     Later will use this freq and the overall freq to determine which pos have snp.
     ''' 
+    
+    #print(f'num ov: {len(tovlps)}')
     fp_freq = None
     if target_seq_record.info:
         fp_gt = num_fp_gt(tovlps, 5, target_seq_record)
+        #print(f'fpgt {fp_gt}')
         if fp_gt:
             freq, aux, fp_freq = count_freq_high_fp(reads, tovlps, target_seq_record)
         else:
@@ -304,6 +314,9 @@ def get_bases_freq_snps(reads: Dict[str, HAECSeqRecord], tname: str,
         # assert target_pos == target_end and query_pos == query_end, f'{target_read}, {query_name}'
         # assert target_pos == target_end and query_pos == query_end, f'{path}'
     # generate consensus
+    #for f in freq[100]:
+    #    print(f)
+    #print('-------------')
     return freq, aux, fp_freq
     
 
@@ -378,8 +391,14 @@ def flatten_freq(freq):
     #flattened_freq = [item for sublist in freq for item in sublist]
     #return np.asarray([get_bases_in_order(counts_dict) for counts_dict in flattened_freq])
     
-def get_snp_GT_list(freq_number_lists, fp_freq_number_lists):
-    return None
+def get_snp_GT(freq_np, fp_freq_np):
+    #print(freq_np[0])
+    #print(fp_freq_np[0])
+    freq_argmax = np.argmax(freq_np, axis=1)
+    fp_freq_argmax = np.argmax(fp_freq_np, axis=1)
+    fp_freq_sum = np.sum(fp_freq_np, axis=1)
+    adjusted_fp_freq_argmax = np.where(fp_freq_sum == 0, freq_argmax, fp_freq_argmax)
+    return np.where(freq_argmax == adjusted_fp_freq_argmax, 0, 1)
 
 '''
 This should return  
@@ -401,19 +420,27 @@ def generate_input_features(reads, overlaps: Dict[str, List[Overlap]]):
         aux_data_list.append(aux_data)
         freq_list += freq
         fp_freq_list += fp_freq
+    #print(freq_list[0][0])
+    #print(fp_freq_list[0][0])
     '''
-    TODO 
     the fp_freqs may be None. in which case there's no truth 
     '''
-    
-    # from list of list of dict to list of dict
-    # also fixes gap count for ins positions
-    flattened_freq = flatten_freq(freq_list)
-    flattened_fp_freq = flatten_freq(fp_freq_list)
-    freq_number_lists = [get_bases_in_order(counts_dict) for counts_dict in flattened_freq]
-    fp_freq_number_lists = [get_bases_in_order(counts_dict) for counts_dict in flattened_fp_freq]
-    
-    return np.asarray(freq_number_lists), aux_data_list
+    snp_truth = None
+    if fp_freq_list[0]:
+        # from list of list of dict to list of dict
+        # also fixes gap count for ins positions
+        flattened_freq = flatten_freq(freq_list)
+        flattened_fp_freq = flatten_freq(fp_freq_list)
+        freq_number_lists = [get_bases_in_order(counts_dict) for counts_dict in flattened_freq]
+        fp_freq_number_lists = [get_bases_in_order(counts_dict) for counts_dict in flattened_fp_freq]
+        freq_np = np.asarray(freq_number_lists)
+        fp_freq_np = np.asarray(fp_freq_number_lists)
+        snp_truth = get_snp_GT(freq_np, fp_freq_np)
+    else:
+        flattened_freq = flatten_freq(freq_list)
+        freq_number_lists = [get_bases_in_order(counts_dict) for counts_dict in flattened_freq]
+        freq_np = np.asarray(freq_number_lists)    
+    return freq_np, aux_data_list, snp_truth
 
 PATTERN = re.compile('(\d+)([=XID])')
 
@@ -424,88 +451,13 @@ def gen(string):
 
  
 '''
-assumes the truth read is the same relative strand and has same name as uncorrected
-'''
-def ground_truth_for_read(aux : aux_data):
-    global reads, truth_reads
-    target_read = reads[aux.tname].seq
-    truth_read = truth_reads[aux.tname].seq
-    
-    align = edlib.align(truth_read, target_read, task='path')
-    path = align['cigar']
-    
-    ###
-    '''
-    nice = edlib.getNiceAlignment(align, truth_read, target_read)
-    tr_align = nice['query_aligned']
-    tg_align = nice['target_aligned']
-    m_align = nice['matched_aligned']
-    
-    for i in range(0, len(tr_align), 80):
-        print(tg_align[i:i+80])
-        print(m_align[i:i+80])
-        print(tr_align[i:i+80])
-    '''
-    
-    ###
-    
-    generator = gen(path)
-    cigar = list(generator)
-    
-    # list of label bases at each pos, encoded as 0,1,2,3,4
-    truth_list = []
-    truth_idx = 0
-    uncorrected_idx = 0
-
-    assert(cigar[0][0] != 'I')
-    for op, length in cigar:
-        if op == '=' or op == 'X':
-            list_of_lists = [[encode[base]] + [GAP_CODE] * aux.ins_counts[uncorrected_idx+i] for i, base in enumerate(truth_read[truth_idx:truth_idx+length])]
-            flattened_truth_values = [value for sublist in list_of_lists for value in sublist]
-            truth_list += flattened_truth_values
-            #truth_list += [encode[base] for base in truth_read[truth_idx:truth_idx+length]]
-            truth_idx += length
-            uncorrected_idx += length
-            
-        elif op == 'D':
-            temp_list = [GAP_CODE] * (length + sum(aux.ins_counts[uncorrected_idx:uncorrected_idx+length]))
-            truth_list += temp_list
-            uncorrected_idx += length
-            
-            
-        elif op == 'I':
-            num_ins_pos_with_support = aux.ins_counts[uncorrected_idx-1]
-            #print(f'unc {uncorrected_idx}, num_ins_pos_with: {num_ins_pos_with_support}')
-            if num_ins_pos_with_support == 0:
-                truth_idx += length
-                continue
-            temp_list = [encode[base] for base in truth_read[truth_idx:truth_idx+min(length, num_ins_pos_with_support)]]
-            
-            '''if num_ins_pos_with_support > length:
-                temp_list += [GAP_CODE] * (num_ins_pos_with_support - length)
-            truth_list[-num_ins_pos_with_support:] = temp_list[:]
-            '''
-            if num_ins_pos_with_support == len(temp_list):
-                truth_list[-num_ins_pos_with_support:] = temp_list[:]
-            else:
-                truth_list[-num_ins_pos_with_support:-num_ins_pos_with_support+len(temp_list)] = temp_list[:]             
-            
-            truth_idx += length
-            
-            
-        else:
-            raise ValueError(f'{op} - Invalid CIGAR operation.')
-    return truth_list       
-'''
 batch_input_features: (n, 5) np array
 truth: (n, ) np array
 '''
 def generate_training_features(overlaps: Dict[str, List[Overlap]]):
     global reads
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
-    list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
-    batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
-    return batch_input_features, np.asarray(batch_ground_truth)
+    batch_input_features, _, truth = generate_input_features(reads, overlaps)
+    return batch_input_features, truth
 
 '''
 batch_input_features: (n, 5) np array
@@ -513,11 +465,10 @@ truth: (n, ) np array
 '''
 def debug_generate_training_features(overlaps: Dict[str, List[Overlap]]):
     global reads
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
-    list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
-    batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
-    read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
-    return batch_input_features, np.asarray(batch_ground_truth), aux_data_list, read
+    batch_input_features, aux_data_list, truth = generate_input_features(reads, overlaps)
+
+    #read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
+    return batch_input_features, truth, aux_data_list#, read
 
 def take_longest(
         overlaps: Dict[str, List[Overlap]]) -> Dict[str, List[Overlap]]:

@@ -57,13 +57,14 @@ def generate_features_and_infer(overlaps: dict[str, list[Overlap]]):
     '''
     batch_input_features is (n, 5) np array
     '''
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
+    batch_input_features, aux_data_list, _ = generate_input_features(reads, overlaps)
     batch_input_features = xgb.DMatrix(data=batch_input_features)
     
     # 1-d contiguous array of predictions
     pred = xgb_model.predict(batch_input_features)
     pred = np.asarray([np.argmax(logit) for logit in pred])
 
+    # TODO adapt to snp prediction
     # construct sequences from predictions
     sequences = construct_sequences(pred, aux_data_list)
      
@@ -74,6 +75,7 @@ def generate_features_and_infer(overlaps: dict[str, list[Overlap]]):
 'main' routine - given various input paths, do inference and write corrected 
 reads to files.
 '''
+#TODO adapt to snp prediction 
 def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, num_proc:int):
     print('Parsing inputs...')
     time1 = time.time()
