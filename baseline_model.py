@@ -22,8 +22,8 @@ from sequences import *
 
 from typing import *
 
-COV = int(1.2 * 35)
-
+#COV = int(1.2 * 35)
+COV = 30
 
 def calculate_iden(cigar):
     matches, mis, ins, dels = 0, 0, 0, 0
@@ -75,7 +75,7 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
         # sr.name = reads[query_name].name
         # sr.description = reads[query_name].description
         # seq_lst.append(sr)
-        cnt = 0
+        #cnt = 0
         # reverse complement
         # recalculate the query start and end in case of RC
         # rc_start = len - end - 1

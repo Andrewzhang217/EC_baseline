@@ -23,7 +23,8 @@ from sequences import *
 
 from typing import *
 
-COV = int(1.2 * 35)
+#COV = int(1.2 * 35)
+COV = 30
 get_bases_in_order = itemgetter('A', 'C', 'G', 'T', 'D')
 
 encode = {
@@ -38,6 +39,8 @@ def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
     print('Parsing inputs...')
     time1 = time.time()
     overlaps = parse_paf(paf_path)
+    overlaps = filter_primary_overlaps(overlaps)
+    extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
     print(f'Time taken for parsing paf: {time2-time1}')
@@ -94,7 +97,7 @@ def one_hot(i):
     return o
 
 # returns a list with the original bases in each position (including ins pos) encoded 
-def get_original_bases(original, ins_counts):
+def get_original_bases(original:str, ins_counts:List[int])->List[int]:
     list_of_lists=  [[encode[original[i]]] + count * [GAP_CODE] for i, count in enumerate(ins_counts)]
     return [item for sublist in list_of_lists for item in sublist]
 '''
@@ -103,7 +106,7 @@ Returns
     2. aux_data for this target read
 '''
 def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
-                  tovlps: List[Overlap]) -> list[list[dict[str, int]]]:
+                  tovlps: List[Overlap]) -> Tuple[List[List[Dict[str, int]]], aux_data, List[int]]:
     # uncorrected
     uncorrected = reads[tname].seq
     # reads before error correction
@@ -255,12 +258,12 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
 #    return [(REVERSED_OP[op], l) for (op, l) in reversed(path)]
 
 
-def fix_gap_count(dicts_for_pos):
+def fix_gap_count(dicts_for_pos:List[Dict[str, int]])->None:
     n_support = sum(dicts_for_pos[0].values())
     for i in range(1, len(dicts_for_pos)):
         dicts_for_pos[i]['D'] = n_support - sum(dicts_for_pos[i].values()) #+ dicts_for_pos[i]['O']
 
-def flatten_freq(freq):
+def flatten_freq(freq:List[List[Dict[str, int]]])->List[Dict[str, int]]:
     for dicts_for_pos in freq:
         fix_gap_count(dicts_for_pos)
     return [item for sublist in freq for item in sublist]
@@ -276,7 +279,7 @@ the positions of all the inputs sequences concatenated.
 in the batch (for generating ground-truth) and total number of positions(dictionaries) for 
 each read (for constructing corrected read from model output)
 '''
-def generate_input_features(reads, overlaps: Dict[str, List[Overlap]]):
+def generate_input_features(reads: Dict[str, HAECSeqRecord], overlaps: Dict[str, List[Overlap]]):
 
     generate_cigar(overlaps, reads)
 
@@ -397,8 +400,8 @@ def debug_generate_training_features(overlaps: Dict[str, List[Overlap]]):
     batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
     list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
     batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
-    read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
-    return batch_input_features, np.asarray(batch_ground_truth), aux_data_list, read
+    #read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
+    return batch_input_features, np.asarray(batch_ground_truth), aux_data_list#, read
 
 def take_longest(
         overlaps: Dict[str, List[Overlap]]) -> Dict[str, List[Overlap]]:
@@ -473,74 +476,3 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     print(f'Time taken to generate training features for {limit} targets: {time6-time5}')
     return all_input_features, all_ground_truth
         
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Feature generation in baseline model style for XGBoost.')
-    parser.add_argument('-i',
-                        '--input',
-                        type=str,
-                        help='path of the input FASTA/Q file.',
-                        required=True)
-    parser.add_argument('-p',
-                        '--paf',
-                        type=str,
-                        help='path of the input PAF file.',
-                        required=True)
-    parser.add_argument('-t',
-                        '--threads',
-                        type=int,
-                        help='number of threads(processes actually',
-                        default=1)
-    args = parser.parse_args()
-    return args
-
-'''
-def wrapper():
-    set_start_method('forkserver')
-
-    args = parse_args()
-
-    t1 = time.time()
-    main(args)
-    t2 = time.time()
-    print('Time elapsed: ', t2 - t1)
-'''
-
-def test(paf_path, input_path, truth_path):
-    global reads, truth_reads
-    truth_reads = get_reads(truth_path)
-    reads = get_reads(input_path)
-    overlaps = parse_paf(paf_path)
-    # overlaps = take_longest(overlaps)
-
-    print("finish parsing")
-    covs = [len(olps) for olps in overlaps.values()]
-    covs.sort()
-    print('Median number of overlaps:', covs[len(covs) // 2])
-    return overlaps
-
-    
-
-def test2(overlaps, i, step):
-    overlap_keys = list(overlaps)
-    overlap_list = overlaps.items()
-    end = min(i + step, len(overlap_list))
-    curr_dict = {k: overlaps[k] for k in overlap_keys[i:end]}
-    time1 = time.time()
-    out =  generate_training_features(curr_dict)
-    time2 = time.time()
-    print(f'time taken for 10: {time2-time1}')
-    return out
-'''
-if __name__ == '__main__':
-    args = parse_args()
-    reads = get_reads(args.input)
-    # set_start_method('forkserver')
-
-    t1 = time.time()
-    main(args)
-    t2 = time.time()
-    print('Time elapsed: ', t2 - t1)
-
-'''

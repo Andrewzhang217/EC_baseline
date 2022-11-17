@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import os
-os.environ["OMP_THREAD_LIMIT"] = "1"
+os.environ["OMP_THREAD_LIMIT"] = "1"  # So that each process only uses 1 cpu
 import argparse
 from XGBoost_features import generate_input_features, aux_data
-from data_parsers import parse_paf, get_reads
+from sequences import get_reads
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 from concurrent.futures import as_completed
@@ -12,15 +12,15 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import xgboost as xgb
 import numpy as np
-from data_parsers import Overlap
+from overlaps import *
 import time
 decoder = {
     0 : 'A',
     1 : 'C',
     2 : 'G',
     3 : 'T',
-    4 : '',
-    5 : ''
+    4 : ''
+    #5 : ''
 }
 
 def decode(i):
@@ -75,10 +75,14 @@ def generate_features_and_infer(overlaps: dict[str, list[Overlap]]):
 reads to files.
 '''
 def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, num_proc:int):
+    
+    #TODO refactor the input reading part into one function or sth
     print('Parsing inputs...')
     time1 = time.time()
     # parse the overlaps
     overlaps = parse_paf(paf_path)
+    overlaps = filter_primary_overlaps(overlaps)
+    extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
     print(f'Time taken for parsing overlaps : {time2 - time1}')

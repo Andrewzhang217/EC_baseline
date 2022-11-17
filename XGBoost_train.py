@@ -11,7 +11,7 @@ train_param = {
     'objective': 'multi:softprob',  
     'num_class': 5} 
 
-train_steps = 50  # The number of training iterations
+train_steps = 30  # The number of training iterations
 
 
 
@@ -68,7 +68,7 @@ def main():
     DM_val = xgb.DMatrix(data=X_val,label=Y_val, nthread=args.threads)
     time1 = time.time()
     print('Training...')
-    model = xgb.train(train_param, DM_train, train_steps, evals=[(DM_train, 'train'), (DM_val, 'eval')], early_stopping_rounds=10)
+    model = xgb.train(train_param, DM_train, train_steps, evals=[(DM_train, 'train'), (DM_val, 'eval')], early_stopping_rounds=5)
     time2 = time.time()
     print(f'Time taken for training: {time2 - time1}')
     model.save_model(args.out)
