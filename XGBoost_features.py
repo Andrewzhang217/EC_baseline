@@ -23,8 +23,18 @@ from sequences import *
 
 from typing import *
 
+INPUTS_TYPE = np.uint16
+LABELS_TYPE = np.uint8
+
+
+
+'''
+TODO use smaller dtype
+
+'''
+
 #COV = int(1.2 * 35)
-COV = 30
+#COV = 30
 get_bases_in_order = itemgetter('A', 'C', 'G', 'T', 'D')
 
 encode = {
@@ -71,7 +81,7 @@ def calculate_iden(cigar):
         else:
             ValueError('Invalid CIGAR')
 
-    return matches / (matches + mis)  # + ins + dels)
+    return matches / (matches + mis + ins + dels)
 
 
 class aux_data:
@@ -100,6 +110,13 @@ def one_hot(i):
 def get_original_bases(original:str, ins_counts:List[int])->List[int]:
     list_of_lists=  [[encode[original[i]]] + count * [GAP_CODE] for i, count in enumerate(ins_counts)]
     return [item for sublist in list_of_lists for item in sublist]
+
+def median_overlaps_per_base(overlaps: Dict[str, List[Overlap]]) -> float:
+    ovlps_per_base = [len(ovlps) / ovlps[0].tlen for ovlps in overlaps.values()]
+    ovlps_per_base.sort()
+
+    return ovlps_per_base[len(ovlps_per_base) // 2]
+
 '''
 Returns 
     1. a list of list of dictionaries, containing the counts of bases in each positions 
@@ -127,14 +144,18 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     total_num_pos = len(freq)
     # TODO check usefulness
     # temp_lst = []
-    if len(tovlps) >= COV:
-        tovlps.sort(key=lambda o: calculate_iden(o.cigar), reverse=True)
-        #tovlps.sort(key=lambda o: o.iden, reverse=True)
-        temp_lst = tovlps[:COV]
+    
+    tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
+
+    k = int(N_OVERLAPS * len(reads[tname].seq))
+    
+    if len(tovlps) >= k:
+        tovlps.sort(key=lambda o:
+                    (o.tend - o.tstart) / o.tlen * calculate_iden(o.cigar)**2,
+                    reverse=True)
+        temp_lst = tovlps[:k]
     else:
         temp_lst = tovlps
-    #if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
-    #    print('Lengths:', len(tovlps), len(temp_lst))
     tovlps = temp_lst
 
     # freq of A C G T and D at each base
@@ -197,7 +218,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     
     return freq, aux_data(tname, ins_counts, total_num_pos), get_original_bases(uncorrected, ins_counts)
     
-    
+
 
 def generate_cigar(overlaps: Dict[str, List[Overlap]],
                    reads: Dict[str, HAECSeqRecord]) -> None:
@@ -224,6 +245,35 @@ def generate_cigar(overlaps: Dict[str, List[Overlap]],
             # cigar_list[query_name].append(reverse_cigar)
         # if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
         #    print('Aln counts:', len(tovlps), count)
+def trim_overlaps_cigar(
+        cigar: List[Tuple[str, int]]) -> Tuple[int, int, int, int]:
+    qstart_trim, tstart_trim = 0, 0
+    while len(cigar) > 0 and (cigar[0][0] != '=' or cigar[0][1] < 5):
+        op, length = cigar.pop(0)
+        if op == '=' or op == 'X':
+            qstart_trim += length
+            tstart_trim += length
+        elif op == 'I':
+            qstart_trim += length
+        elif op == 'D':
+            tstart_trim += length
+        else:
+            ValueError('Invalid CIGAR operation.')
+
+    qend_trim, tend_trim = 0, 0
+    while len(cigar) > 0 and (cigar[-1][0] != '=' or cigar[-1][1] < 5):
+        op, length = cigar.pop()
+        if op == '=' or op == 'X':
+            qend_trim += length
+            tend_trim += length
+        elif op == 'I':
+            qend_trim += length
+        elif op == 'D':
+            tend_trim += length
+        else:
+            ValueError('Invalid CIGAR operation.')
+
+    return qstart_trim, qend_trim, tstart_trim, tend_trim
 
 
 def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
@@ -244,11 +294,22 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
 
     generator = gen(path)
     cigar = list(generator)
-    # dels = sum(i for _, i in path if _ == 'D')
-    # inserts = sum(i for _, i in path if _ == 'I')
-    # total_dels += dels
-    # print(f'deletions: {dels}')
-    # print(f'insertions: {inserts}')
+    qstart_trim, qend_trim, tstart_trim, tend_trim = trim_overlaps_cigar(cigar)
+
+    # Trim query
+    if overlap.strand == '+':
+        overlap.qstart += qstart_trim
+        overlap.qend -= qend_trim
+    else:
+        overlap.qend -= qstart_trim
+        overlap.qstart += qend_trim
+
+    # Trim target
+    overlap.tstart += tstart_trim
+    overlap.tend -= tend_trim
+
+    if len(cigar) == 0:
+        return None
     return cigar
 
 
@@ -273,7 +334,7 @@ def flatten_freq(freq:List[List[Dict[str, int]]])->List[Dict[str, int]]:
 
 '''
 This should return  
-1. shape (n, 5) numpy arrays containing all
+1. shape (n, 10) numpy arrays containing all
 the positions of all the inputs sequences concatenated.
 2. a list of aux_data, containing info on number of ins in each position of each target read
 in the batch (for generating ground-truth) and total number of positions(dictionaries) for 
@@ -433,6 +494,23 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     covs = [len(olps) for olps in overlaps.values()]
     covs.sort()
     print('Median number of overlaps:', covs[len(covs) // 2])
+    
+    valid_overlaps = {}
+    n_valid, n_invalid = 0, 0
+    for name, ovlps in overlaps.items():
+        valid = [o for o in ovlps if not remove_overlap(o)]
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+        n_valid += len(valid)
+        n_invalid += len(ovlps) - len(valid)
+    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
+    overlaps = valid_overlaps
+    
+    global N_OVERLAPS
+    N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
+    print('Median overlaps per 100 kbp:', N_OVERLAPS * 100_000)
     
     
     

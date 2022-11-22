@@ -23,7 +23,11 @@ from sequences import *
 from typing import *
 
 #COV = int(1.2 * 35)
-COV = 30
+def median_overlaps_per_base(overlaps: Dict[str, List[Overlap]]) -> float:
+    ovlps_per_base = [len(ovlps) / ovlps[0].tlen for ovlps in overlaps.values()]
+    ovlps_per_base.sort()
+
+    return ovlps_per_base[len(ovlps_per_base) // 2]
 
 def calculate_iden(cigar):
     matches, mis, ins, dels = 0, 0, 0, 0
@@ -39,7 +43,7 @@ def calculate_iden(cigar):
         else:
             ValueError('Invalid CIGAR')
 
-    return matches / (matches + mis)  # + ins + dels)
+    return matches / (matches + mis + ins + dels)
 
 
 def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
@@ -56,16 +60,18 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
         freq.append([])
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
+    
+    tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
 
-    # TODO check usefulness
-    # temp_lst = []
-    if len(tovlps) >= COV:
-        tovlps.sort(key=lambda o: calculate_iden(o.cigar), reverse=True)
-        temp_lst = tovlps[:COV]
+    k = int(N_OVERLAPS * len(reads[tname].seq))
+    
+    if len(tovlps) >= k:
+        tovlps.sort(key=lambda o:
+                    (o.tend - o.tstart) / o.tlen * calculate_iden(o.cigar)**2,
+                    reverse=True)
+        temp_lst = tovlps[:k]
     else:
         temp_lst = tovlps
-    #if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
-    #    print('Lengths:', len(tovlps), len(temp_lst))
     tovlps = temp_lst
 
     # freq of A C G T and D at each base
@@ -200,6 +206,35 @@ def generate_cigar(overlaps: Dict[str, List[Overlap]],
             # cigar_list[query_name].append(reverse_cigar)
         # if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
         #    print('Aln counts:', len(tovlps), count)
+def trim_overlaps_cigar(
+        cigar: List[Tuple[str, int]]) -> Tuple[int, int, int, int]:
+    qstart_trim, tstart_trim = 0, 0
+    while len(cigar) > 0 and (cigar[0][0] != '=' or cigar[0][1] < 5):
+        op, length = cigar.pop(0)
+        if op == '=' or op == 'X':
+            qstart_trim += length
+            tstart_trim += length
+        elif op == 'I':
+            qstart_trim += length
+        elif op == 'D':
+            tstart_trim += length
+        else:
+            ValueError('Invalid CIGAR operation.')
+
+    qend_trim, tend_trim = 0, 0
+    while len(cigar) > 0 and (cigar[-1][0] != '=' or cigar[-1][1] < 5):
+        op, length = cigar.pop()
+        if op == '=' or op == 'X':
+            qend_trim += length
+            tend_trim += length
+        elif op == 'I':
+            qend_trim += length
+        elif op == 'D':
+            tend_trim += length
+        else:
+            ValueError('Invalid CIGAR operation.')
+
+    return qstart_trim, qend_trim, tstart_trim, tend_trim
 
 
 def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
@@ -220,11 +255,22 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
 
     generator = gen(path)
     cigar = list(generator)
-    # dels = sum(i for _, i in path if _ == 'D')
-    # inserts = sum(i for _, i in path if _ == 'I')
-    # total_dels += dels
-    # print(f'deletions: {dels}')
-    # print(f'insertions: {inserts}')
+    qstart_trim, qend_trim, tstart_trim, tend_trim = trim_overlaps_cigar(cigar)
+
+    # Trim query
+    if overlap.strand == '+':
+        overlap.qstart += qstart_trim
+        overlap.qend -= qend_trim
+    else:
+        overlap.qend -= qstart_trim
+        overlap.qstart += qend_trim
+
+    # Trim target
+    overlap.tstart += tstart_trim
+    overlap.tend -= tend_trim
+
+    if len(cigar) == 0:
+        return None
     return cigar
 
 
@@ -286,6 +332,24 @@ def main(args):
     covs = [len(olps) for olps in overlaps.values()]
     covs.sort()
     print('Median number of overlaps:', covs[len(covs) // 2])
+
+    valid_overlaps = {}
+    n_valid, n_invalid = 0, 0
+    for name, ovlps in overlaps.items():
+        valid = [o for o in ovlps if not remove_overlap(o)]
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+        n_valid += len(valid)
+        n_invalid += len(ovlps) - len(valid)
+    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
+    overlaps = valid_overlaps
+    
+    global N_OVERLAPS
+    N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
+    print('Median overlaps per 100 kbp:', N_OVERLAPS * 100_000)
+
 
     futures_ec_reads = []
     overlap_keys = list(overlaps)

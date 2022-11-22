@@ -2,7 +2,8 @@
 import os
 os.environ["OMP_THREAD_LIMIT"] = "1"  # So that each process only uses 1 cpu
 import argparse
-from XGBoost_features import generate_input_features, aux_data
+import XGBoost_features
+from XGBoost_features import generate_input_features, aux_data, median_overlaps_per_base
 from sequences import get_reads
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
@@ -99,7 +100,29 @@ def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, 
     covs = [len(olps) for olps in overlaps.values()]
     covs.sort()
     print('Median number of overlaps:', covs[len(covs) // 2])
+    print(f'Total number of overlaps: {sum(covs)}')    
+    
+    
+    valid_overlaps = {}
+    n_valid, n_invalid = 0, 0
+    for name, ovlps in overlaps.items():
+        valid = [o for o in ovlps if not remove_overlap(o)]
 
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+        n_valid += len(valid)
+        n_invalid += len(ovlps) - len(valid)
+        
+    # TODO I think should sort out all these usage of global...
+    # maybe usage a separate module for them, and maybe the initial I/O?
+    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
+    overlaps = valid_overlaps
+    XGBoost_features.N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
+    print('Median overlaps per 100 kbp:', XGBoost_features.N_OVERLAPS * 100_000)
+    
+    
+    
     overlap_keys = list(overlaps)
     overlap_list = overlaps.items()
     
@@ -173,8 +196,12 @@ def parse_args():
     return args
 
 def main():
+    time_start = time.time()
     args = parse_args()
     do_inference(args.model, args.paf, args.input, args.out, args.threads)
+    time_end = time.time()
+    print(f'Total time taken: {time_end-time_start}')
                 
 if __name__ == '__main__':
     main()
+    

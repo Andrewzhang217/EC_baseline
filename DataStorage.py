@@ -17,9 +17,8 @@ Requirements:
 
 
 Design ideas:
-1. Need some kind of index object in the file to find data for a specific target read
-2. Each batch should contain input features, optionally contains labels, optionally contains auxiliary 
-data 
+1. (obsolete) Need some kind of index object in the file to find data for a specific target read 
+2. Each batch should contain input features and auxiliary data, optionally contains labels
 3. maybe the different batches will just be named by some index number? since they each will
 consist of data for many target reads, not really anything to distinguish them (the index range of target
 reads in some container is possible, but it may not be a fixed order? e.g. dictionary items)
@@ -39,7 +38,7 @@ structure:
 '''
 
 '''
-Since auxiliary data format can be changing a lot. Put this function here
+Since auxiliary data format can be changing a lot. Put these functions here
 '''
 def write_auxiliary_data(auxiliary_data:List[aux_data], batch_group:h5py.Group):
     # the target read names
@@ -71,9 +70,12 @@ def read_auxiliary_data_single(batch_group:h5py.Group, idx:int)->List[aux_data]:
     ins_lists_np = batch_group['ins_counts']
     num_pos_list_np = batch_group['num_pos']
     return aux_data(target_names_np[idx].decode(), ins_lists_np[idx], num_pos_list_np[idx])
-    
+
+
+'''
+Supports one-off writing and no more modifications after closing the file.
+'''    
 class DataStorage:
-    # mode is either 'w' or 'r'
     def __load_index__(self) -> Dict[str, List[int]]:
         index_dict = {}
         for batch_idx in range(self.num_batches):
@@ -84,8 +86,10 @@ class DataStorage:
             for i, aux in enumerate(auxiliary_data):
                 index_dict[aux.tname] = [batch_idx, i, starts[i]]
         return index_dict
+    
     '''
     Index sequences only for reading mode
+    mode is either 'w' or 'r'
     '''
     def __init__(self, path_to_file:str, mode:str, index:bool=False):
         self.mode = mode
@@ -129,6 +133,9 @@ class DataStorage:
         
         self.num_batches += 1
     
+    '''
+    Get total num_batches from self.num_batches
+    '''
     def read_batch(self, batch_id:int)->Tuple[np.ndarray, np.ndarray, List[aux_data]]:
         batch_group = self.data_group[f'batch{batch_id}']
         labels_ds = batch_group['labels']
@@ -138,6 +145,7 @@ class DataStorage:
             labels = np.asarray(labels_ds, LABELS_TYPE)
         return np.asarray(batch_group['inputs'], dtype=INPUTS_TYPE), \
             labels, read_auxiliary_data(batch_group)
+    
     # requires index
     def get_data_for_target(self, tname:str):
         batch_idx, seq_idx, start_idx = self.index[tname]
