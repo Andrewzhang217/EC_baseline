@@ -14,7 +14,7 @@ from typing import *
 COV_WINDOW_SIZE = 16
 OL_THRESHOLD = 1
 DOUBLE_OL_THRESHOLD = 2 * OL_THRESHOLD
-
+EXTENSION_BP = 500
 
 @dataclass
 class Overlap:
@@ -85,33 +85,71 @@ def filter_primary_overlaps(
 def extend_overlaps(overlaps: Dict[str, List[Overlap]]) -> None:
     for ovlps in tqdm(overlaps.values(), 'Extending overlaps'):
         for o in ovlps:
-            o.qstart = max(o.qstart - 200, 0)
-            o.qend = min(o.qend + 200, o.qlen)
-            o.tstart = max(o.tstart - 200, 0)
-            o.tend = min(o.tend + 200, o.tlen)
+            o.qstart = max(o.qstart - EXTENSION_BP, 0)
+            o.qend = min(o.qend + EXTENSION_BP, o.qlen)
+            o.tstart = max(o.tstart - EXTENSION_BP, 0)
+            o.tend = min(o.tend + EXTENSION_BP, o.tlen)
 
 
-def remove_overlap(overlap: Overlap) -> bool:
+def remove_overlap_ratio(overlap: Overlap) -> bool:
+    #t_ovlp_len = overlap.tend - overlap.tstart
+    #q_ovlp_len = overlap.qend - overlap.qstart
+
     ratio = (overlap.tend - overlap.tstart) / (overlap.qend - overlap.qstart)
-    if ratio > 1.0526 or ratio < 0.95:
-        return True  # Overlapping lengths differ significantly
 
+    if ratio > 1.111 or ratio < 0.9:
+        '''try:
+            for o in true_overlaps[overlap.tname]:
+                if o.qname == overlap.qname:
+                    print(overlap)
+                    print(o)
+                    print()
+                    # print('Ratio filter\n')
+                    if t_ovlp_len < 1000 or q_ovlp_len < 1000:
+                        return True, 54
+                    return True, 0
+        except KeyError:
+            pass'''
+
+        return True, None  # Overlapping lengths differ significantly
+
+    return False, -1
+
+def remove_overlap(overlap: Overlap,
+                   true_overlaps: Dict[str, List[Overlap]]) -> bool:
     if (overlap.qlen - (overlap.qend - overlap.qstart)) <= DOUBLE_OL_THRESHOLD:
         return False  # Query covered completely
 
     if (overlap.tlen - (overlap.tend - overlap.tstart)) <= DOUBLE_OL_THRESHOLD:
         return False  # Target covered completely
 
-    if overlap.qstart > OL_THRESHOLD and overlap.tstart <= OL_THRESHOLD and (
-            overlap.qlen - overlap.qend) <= OL_THRESHOLD:
+    # Fixing bug with wrongly filtering out prefix or suffix overlaps
+    if overlap.strand == '-':
+        qstart = overlap.qlen - overlap.qend
+        qend = overlap.qlen - overlap.qstart
+    else:
+        qstart = overlap.qstart
+        qend = overlap.qend
+
+    if qstart > OL_THRESHOLD and overlap.tstart <= OL_THRESHOLD and (
+            overlap.qlen - qend) <= OL_THRESHOLD:
         return False  # Prefix overlap between query and target
 
-    if overlap.tstart > OL_THRESHOLD and overlap.qstart <= OL_THRESHOLD and (
+    if overlap.tstart > OL_THRESHOLD and qstart <= OL_THRESHOLD and (
             overlap.tlen - overlap.tend) <= OL_THRESHOLD:
         return False  # Suffix overlap between query and target
 
-    return True
+    try:
+        for o in true_overlaps[overlap.tname]:
+            if o.qname == overlap.qname:
+                return True
+                '''print(overlap)
+                print(o)
+                print('Invalid overlap\n')'''
+    except KeyError:
+        pass
 
+    return True
 
 def calc_pile(overlaps: List[Overlap], legnth: int) -> List[int]:
     cov = [0] * ceil(legnth / COV_WINDOW_SIZE)

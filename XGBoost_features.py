@@ -17,7 +17,7 @@ import re
 import sys
 from operator import itemgetter
 import numpy as np
-from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps
+from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps, remove_overlap_ratio
 from sequences import *
 #from data_parsers import *
 
@@ -57,8 +57,6 @@ def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
     covs = [len(olps) for olps in overlaps.values()]
     covs.sort()
     print('Median number of overlaps:', covs[len(covs) // 2])
-    
-    
     
     global reads, truth_reads
     time3 = time.time()
@@ -110,13 +108,9 @@ def one_hot(i):
 def get_original_bases(original:str, ins_counts:List[int])->List[int]:
     list_of_lists=  [[encode[original[i]]] + count * [GAP_CODE] for i, count in enumerate(ins_counts)]
     return [item for sublist in list_of_lists for item in sublist]
-
-def median_overlaps_per_base(overlaps: Dict[str, List[Overlap]]) -> float:
-    ovlps_per_base = [len(ovlps) / ovlps[0].tlen for ovlps in overlaps.values()]
-    ovlps_per_base.sort()
-
-    return ovlps_per_base[len(ovlps_per_base) // 2]
-
+def median_n_overlaps(overlaps: Dict[str, List[Overlap]]) -> float:
+    n_overlaps = [len(ovlps) for ovlps in overlaps.values()]
+    return np.median(n_overlaps)
 '''
 Returns 
     1. a list of list of dictionaries, containing the counts of bases in each positions 
@@ -145,7 +139,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     # TODO check usefulness
     # temp_lst = []
     
-    tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
+    '''tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
 
     k = int(N_OVERLAPS * len(reads[tname].seq))
     
@@ -156,7 +150,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
         temp_lst = tovlps[:k]
     else:
         temp_lst = tovlps
-    tovlps = temp_lst
+    tovlps = temp_lst'''
 
     # freq of A C G T and D at each base
     for overlap in tovlps:
@@ -487,6 +481,19 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     time1 = time.time()
     overlaps = parse_paf(paf_path)
     overlaps = filter_primary_overlaps(overlaps)
+    
+    valid_overlaps = {}
+    for name, ovlps in overlaps.items():
+        valid = []
+        for o in ovlps:
+            remove = remove_overlap_ratio(o)
+            if not remove:
+                valid.append(o)
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+    overlaps = valid_overlaps
     extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
@@ -498,7 +505,12 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
     valid_overlaps = {}
     n_valid, n_invalid = 0, 0
     for name, ovlps in overlaps.items():
-        valid = [o for o in ovlps if not remove_overlap(o)]
+        valid = []
+        # valid = [o for o in ovlps if not remove_overlap(o)]
+        for o in ovlps:
+            remove = remove_overlap(o)
+            if not remove:
+                valid.append(o)
 
         if len(valid) > 0:
             valid_overlaps[name] = valid
@@ -507,12 +519,6 @@ def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_pro
         n_invalid += len(ovlps) - len(valid)
     print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
     overlaps = valid_overlaps
-    
-    global N_OVERLAPS
-    N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
-    print('Median overlaps per 100 kbp:', N_OVERLAPS * 100_000)
-    
-    
     
     global reads, truth_reads
     time3 = time.time()

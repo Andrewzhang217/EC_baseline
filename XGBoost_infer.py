@@ -3,7 +3,7 @@ import os
 os.environ["OMP_THREAD_LIMIT"] = "1"  # So that each process only uses 1 cpu
 import argparse
 import XGBoost_features
-from XGBoost_features import generate_input_features, aux_data, median_overlaps_per_base
+from XGBoost_features import generate_input_features, aux_data
 from sequences import get_reads
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
@@ -13,7 +13,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import xgboost as xgb
 import numpy as np
-from overlaps import *
+from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps, remove_overlap_ratio
 import time
 decoder = {
     0 : 'A',
@@ -83,6 +83,18 @@ def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, 
     # parse the overlaps
     overlaps = parse_paf(paf_path)
     overlaps = filter_primary_overlaps(overlaps)
+    valid_overlaps = {}
+    for name, ovlps in overlaps.items():
+        valid = []
+        for o in ovlps:
+            remove, tag = remove_overlap_ratio(o)
+            if not remove:
+                valid.append(o)
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+    overlaps = valid_overlaps
     extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
@@ -106,7 +118,12 @@ def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, 
     valid_overlaps = {}
     n_valid, n_invalid = 0, 0
     for name, ovlps in overlaps.items():
-        valid = [o for o in ovlps if not remove_overlap(o)]
+        valid = []
+        # valid = [o for o in ovlps if not remove_overlap(o)]
+        for o in ovlps:
+            remove = remove_overlap(o)
+            if not remove:
+                valid.append(o)
 
         if len(valid) > 0:
             valid_overlaps[name] = valid
@@ -118,9 +135,6 @@ def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, 
     # maybe usage a separate module for them, and maybe the initial I/O?
     print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
     overlaps = valid_overlaps
-    XGBoost_features.N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
-    print('Median overlaps per 100 kbp:', XGBoost_features.N_OVERLAPS * 100_000)
-    
     
     
     overlap_keys = list(overlaps)

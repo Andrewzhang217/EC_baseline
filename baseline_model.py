@@ -16,18 +16,14 @@ from concurrent.futures import as_completed
 import itertools
 import re
 import sys
-from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps
+from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps, remove_overlap_ratio
 from sequences import *
+import numpy as np
 #from data_parsers import *
 
 from typing import *
-
+MIN_BASE = 5
 #COV = int(1.2 * 35)
-def median_overlaps_per_base(overlaps: Dict[str, List[Overlap]]) -> float:
-    ovlps_per_base = [len(ovlps) / ovlps[0].tlen for ovlps in overlaps.values()]
-    ovlps_per_base.sort()
-
-    return ovlps_per_base[len(ovlps_per_base) // 2]
 
 def calculate_iden(cigar):
     matches, mis, ins, dels = 0, 0, 0, 0
@@ -44,7 +40,9 @@ def calculate_iden(cigar):
             ValueError('Invalid CIGAR')
 
     return matches / (matches + mis + ins + dels)
-
+def median_n_overlaps(overlaps: Dict[str, List[Overlap]]) -> float:
+    n_overlaps = [len(ovlps) for ovlps in overlaps.values()]
+    return np.median(n_overlaps)
 
 def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
                   tovlps: List[Overlap]) -> str:
@@ -61,7 +59,7 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
         freq[i].append(defaultdict(int))
         freq[i][0][base] += 1
     
-    tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
+    '''tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
 
     k = int(N_OVERLAPS * len(reads[tname].seq))
     
@@ -72,20 +70,9 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
         temp_lst = tovlps[:k]
     else:
         temp_lst = tovlps
-    tovlps = temp_lst
+    tovlps = temp_lst'''
 
-    # freq of A C G T and D at each base
     for overlap in tovlps:
-        # sr = SeqRecord(reads[query_name].seq)
-        # sr.id = reads[query_name].id
-        # sr.name = reads[query_name].name
-        # sr.description = reads[query_name].description
-        # seq_lst.append(sr)
-        #cnt = 0
-        # reverse complement
-        # recalculate the query start and end in case of RC
-        # rc_start = len - end - 1
-        # rc_end = len - start
         target_pos = overlap.tstart
         query_seq_record = reads[overlap.qname]
         if overlap.strand == '+':
@@ -94,11 +81,6 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
         if overlap.strand == '-':
             query_read = query_seq_record.reverse_complement()
             query_pos = len(query_read) - overlap.qend
-            # query_end = len(query_read) - overlap.qstart
-        # print(f'target_start: {target_start}, target_end:{target_end}')
-        # print(uncorrected[target_start:target_end])
-        # print(f'query_start{query_start}, query_end{query_end}')
-        # print(query_read[query_start:query_end])
 
         for operation, length in overlap.cigar:
             if operation == '=' or operation == 'X':
@@ -157,7 +139,7 @@ def generate_consensus(uncorrected, freq):
             # print(max_occ)
             if c1 == 0:
                 break
-            if c1 < 5:
+            if c1 < MIN_BASE:
                 # #print(cnt)
                 # counter += 1
                 if i == 0:
@@ -325,6 +307,18 @@ def take_longest(
 def main(args):
     overlaps = parse_paf(args.paf)
     overlaps = filter_primary_overlaps(overlaps)
+    valid_overlaps = {}
+    for name, ovlps in overlaps.items():
+        valid = []
+        for o in ovlps:
+            remove, tag = remove_overlap_ratio(o)
+            if not remove:
+                valid.append(o)
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+    overlaps = valid_overlaps
     extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
 
@@ -336,7 +330,13 @@ def main(args):
     valid_overlaps = {}
     n_valid, n_invalid = 0, 0
     for name, ovlps in overlaps.items():
-        valid = [o for o in ovlps if not remove_overlap(o)]
+        valid = []
+        # valid = [o for o in ovlps if not remove_overlap(o)]
+        for o in ovlps:
+            remove = remove_overlap(o, true_overlaps)
+            if not remove:
+                valid.append(o)
+
 
         if len(valid) > 0:
             valid_overlaps[name] = valid
@@ -346,9 +346,6 @@ def main(args):
     print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
     overlaps = valid_overlaps
     
-    global N_OVERLAPS
-    N_OVERLAPS = median_overlaps_per_base(overlaps) / 2
-    print('Median overlaps per 100 kbp:', N_OVERLAPS * 100_000)
 
 
     futures_ec_reads = []
