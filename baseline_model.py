@@ -16,7 +16,8 @@ from concurrent.futures import as_completed
 import itertools
 import re
 import sys
-from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps, remove_overlap_ratio
+from overlaps import load_overlaps, Overlap
+import globals
 from sequences import *
 import numpy as np
 #from data_parsers import *
@@ -47,7 +48,7 @@ def median_n_overlaps(overlaps: Dict[str, List[Overlap]]) -> float:
 def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
                   tovlps: List[Overlap]) -> str:
     # uncorrected
-    uncorrected = reads[tname].seq
+    uncorrected = globals.reads[tname].seq
     # reads before error correction
     # seq_lst.append(reads[target_read])
     # print(len(uncorrected))
@@ -74,7 +75,7 @@ def correct_error(reads: Dict[str, HAECSeqRecord], tname: str,
 
     for overlap in tovlps:
         target_pos = overlap.tstart
-        query_seq_record = reads[overlap.qname]
+        query_seq_record = globals.reads[overlap.qname]
         if overlap.strand == '+':
             query_read = query_seq_record.seq
             query_pos = overlap.qstart
@@ -270,20 +271,19 @@ def gen(string):
 
 
 def generate_cigar_correct_error(overlaps: Dict[str, List[Overlap]]):
-    global reads
 
-    generate_cigar(overlaps, reads)
+    generate_cigar(overlaps, globals.reads)
 
     seq_lst = []
     for tname, tovlps in overlaps.items():
         tovlps = [o for o in tovlps if o.cigar is not None]
-        corrected = correct_error(reads, tname, tovlps)
+        corrected = correct_error(globals.reads, tname, tovlps)
 
         # TODO to HAECRecord
         corrected_seq = SeqRecord(Seq(corrected))
-        corrected_seq.id = reads[tname].id
-        corrected_seq.name = reads[tname].name
-        corrected_seq.description = reads[tname].description
+        corrected_seq.id = globals.reads[tname].id
+        corrected_seq.name = globals.reads[tname].name
+        corrected_seq.description = globals.reads[tname].description
         seq_lst.append(corrected_seq)
 
     return seq_lst
@@ -305,49 +305,10 @@ def take_longest(
 
 
 def main(args):
-    overlaps = parse_paf(args.paf)
-    overlaps = filter_primary_overlaps(overlaps)
-    valid_overlaps = {}
-    for name, ovlps in overlaps.items():
-        valid = []
-        for o in ovlps:
-            remove, tag = remove_overlap_ratio(o)
-            if not remove:
-                valid.append(o)
-
-        if len(valid) > 0:
-            valid_overlaps[name] = valid
-
-    overlaps = valid_overlaps
-    extend_overlaps(overlaps)
-    # overlaps = take_longest(overlaps)
-
-    print("finish parsing")
-    covs = [len(olps) for olps in overlaps.values()]
-    covs.sort()
-    print('Median number of overlaps:', covs[len(covs) // 2])
-
-    valid_overlaps = {}
-    n_valid, n_invalid = 0, 0
-    for name, ovlps in overlaps.items():
-        valid = []
-        # valid = [o for o in ovlps if not remove_overlap(o)]
-        for o in ovlps:
-            remove = remove_overlap(o, true_overlaps)
-            if not remove:
-                valid.append(o)
-
-
-        if len(valid) > 0:
-            valid_overlaps[name] = valid
-
-        n_valid += len(valid)
-        n_invalid += len(ovlps) - len(valid)
-    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
-    overlaps = valid_overlaps
     
-
-
+    overlaps = load_overlaps(args.paf)
+    globals.parse_input_reads(args.input)
+    
     futures_ec_reads = []
     overlap_keys = list(overlaps)
     overlap_list = overlaps.items()
@@ -370,7 +331,7 @@ def main(args):
                 SeqIO.write(result.result(), f_out, 'fasta')
 
             # Write uncorrected reads
-            for r_id, record in reads.items():
+            for r_id, record in globals.reads.items():
                 if r_id not in overlaps:
                     f_out.write(f'>{r_id} {record.description}\n')
                     f_out.write(f'{record.seq}\n')
@@ -416,7 +377,7 @@ def wrapper():
 
 if __name__ == '__main__':
     args = parse_args()
-    reads = get_reads(args.input)
+    #reads = get_reads(args.input)
     # set_start_method('forkserver')
 
     t1 = time.time()

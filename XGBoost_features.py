@@ -17,11 +17,12 @@ import re
 import sys
 from operator import itemgetter
 import numpy as np
-from overlaps import parse_paf, filter_primary_overlaps, remove_overlap, Overlap, extend_overlaps, remove_overlap_ratio
+from overlaps import load_overlaps, Overlap
 from sequences import *
 #from data_parsers import *
 
 from typing import *
+import globals
 
 INPUTS_TYPE = np.uint16
 LABELS_TYPE = np.uint8
@@ -45,26 +46,7 @@ encode = {
 }
 
 GAP_CODE = 4
-def debug_overlaps(paf_path:str, reads_path:str, truth_path:str):
-    print('Parsing inputs...')
-    time1 = time.time()
-    overlaps = parse_paf(paf_path)
-    overlaps = filter_primary_overlaps(overlaps)
-    extend_overlaps(overlaps)
-    # overlaps = take_longest(overlaps)
-    time2 = time.time()
-    print(f'Time taken for parsing paf: {time2-time1}')
-    covs = [len(olps) for olps in overlaps.values()]
-    covs.sort()
-    print('Median number of overlaps:', covs[len(covs) // 2])
-    
-    global reads, truth_reads
-    time3 = time.time()
-    reads = get_reads(reads_path)
-    truth_reads = get_reads(truth_path)
-    time4 = time.time()
-    print(f"Time taken for parsing reads: {time4-time3}")
-    return overlaps
+
 def calculate_iden(cigar):
     matches, mis, ins, dels = 0, 0, 0, 0
     for op, length in cigar:
@@ -352,7 +334,7 @@ def generate_input_features(reads: Dict[str, HAECSeqRecord], overlaps: Dict[str,
     # also fixes gap count for ins positions
     flattened_freq = flatten_freq(freq_list)
     assert(len(all_original_bases) == len(flattened_freq))
-    return np.asarray([list(get_bases_in_order(counts_dict)) + one_hot(original_base) for counts_dict, original_base in zip(flattened_freq, all_original_bases)]), aux_data_list
+    return np.array([list(get_bases_in_order(counts_dict)) + one_hot(original_base) for counts_dict, original_base in zip(flattened_freq, all_original_bases)], INPUTS_TYPE), aux_data_list
 
 PATTERN = re.compile('(\d+)([=XID])')
 
@@ -366,9 +348,9 @@ def gen(string):
 assumes the truth read is the same relative strand and has same name as uncorrected
 '''
 def ground_truth_for_read(aux : aux_data):
-    global reads, truth_reads
-    target_read = reads[aux.tname].seq
-    truth_read = truth_reads[aux.tname].seq
+    #global reads, truth_reads
+    target_read = globals.reads[aux.tname].seq
+    truth_read = globals.truth_reads[aux.tname].seq
     
     align = edlib.align(truth_read, target_read, task='path')
     path = align['cigar']
@@ -440,93 +422,21 @@ batch_input_features: (n, 5) np array
 truth: (n, ) np array
 '''
 def generate_training_features(overlaps: Dict[str, List[Overlap]]):
-    global reads
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
+    #global reads
+    batch_input_features, aux_data_list = generate_input_features(globals.reads, overlaps)
     list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
     batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
-    return batch_input_features, np.asarray(batch_ground_truth)
-
-'''
-batch_input_features: (n, 5) np array
-truth: (n, ) np array
-'''
-def debug_generate_training_features(overlaps: Dict[str, List[Overlap]]):
-    global reads
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
-    list_of_lists = [ground_truth_for_read(aux) for aux in aux_data_list]
-    batch_ground_truth = [label for sub_list in list_of_lists for label in sub_list]
-    #read = reads['60b405f2-c66f-4cc4-8524-62e19b211c7f_1']
-    return batch_input_features, np.asarray(batch_ground_truth), aux_data_list#, read
-
-def take_longest(
-        overlaps: Dict[str, List[Overlap]]) -> Dict[str, List[Overlap]]:
-    longest = {}
-    for tname, tovlps in overlaps.items():
-        tovlps_to_qname = defaultdict(list)
-        for o in tovlps:
-            tovlps_to_qname[o.qname].append(o)
-
-        for ovlps in tovlps_to_qname.values():
-            ovlps.sort(key=lambda o: (o.tend - o.tstart), reverse=True)
-        longest[tname] = [ovlps[0] for ovlps in tovlps_to_qname.values()]
-
-    return longest
-
-
+    return batch_input_features, np.array(batch_ground_truth, LABELS_TYPE)
 
 # Pool all the inputs features and ground-truth labels 
 # for training
 def generate_training_data(paf_path:str, reads_path:str, truth_path:str, num_proc:int, limit:int):
-    print('Parsing inputs...')
-    time1 = time.time()
-    overlaps = parse_paf(paf_path)
-    overlaps = filter_primary_overlaps(overlaps)
     
-    valid_overlaps = {}
-    for name, ovlps in overlaps.items():
-        valid = []
-        for o in ovlps:
-            remove = remove_overlap_ratio(o)
-            if not remove:
-                valid.append(o)
+    overlaps = load_overlaps(paf_path)
 
-        if len(valid) > 0:
-            valid_overlaps[name] = valid
+    globals.parse_input_reads(reads_path)
+    globals.parse_truth_reads(truth_path)    
 
-    overlaps = valid_overlaps
-    extend_overlaps(overlaps)
-    # overlaps = take_longest(overlaps)
-    time2 = time.time()
-    print(f'Time taken for parsing paf: {time2-time1}')
-    covs = [len(olps) for olps in overlaps.values()]
-    covs.sort()
-    print('Median number of overlaps:', covs[len(covs) // 2])
-    
-    valid_overlaps = {}
-    n_valid, n_invalid = 0, 0
-    for name, ovlps in overlaps.items():
-        valid = []
-        # valid = [o for o in ovlps if not remove_overlap(o)]
-        for o in ovlps:
-            remove = remove_overlap(o)
-            if not remove:
-                valid.append(o)
-
-        if len(valid) > 0:
-            valid_overlaps[name] = valid
-
-        n_valid += len(valid)
-        n_invalid += len(ovlps) - len(valid)
-    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
-    overlaps = valid_overlaps
-    
-    global reads, truth_reads
-    time3 = time.time()
-    reads = get_reads(reads_path)
-    truth_reads = get_reads(truth_path)
-    time4 = time.time()
-    print(f"Time taken for parsing reads: {time4-time3}")
-    
 
     futures_input_features = []
     overlap_keys = list(overlaps)

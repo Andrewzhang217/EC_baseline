@@ -6,10 +6,12 @@ from collections import defaultdict
 from math import ceil
 import argparse
 import sys
+import time
 
 from sequences import *
 
 from typing import *
+
 
 COV_WINDOW_SIZE = 16
 OL_THRESHOLD = 1
@@ -96,7 +98,6 @@ def remove_overlap_ratio(overlap: Overlap) -> bool:
     #q_ovlp_len = overlap.qend - overlap.qstart
 
     ratio = (overlap.tend - overlap.tstart) / (overlap.qend - overlap.qstart)
-
     if ratio > 1.111 or ratio < 0.9:
         '''try:
             for o in true_overlaps[overlap.tname]:
@@ -111,12 +112,10 @@ def remove_overlap_ratio(overlap: Overlap) -> bool:
         except KeyError:
             pass'''
 
-        return True, None  # Overlapping lengths differ significantly
+        return True  # Overlapping lengths differ significantly
 
-    return False, -1
-
-def remove_overlap(overlap: Overlap,
-                   true_overlaps: Dict[str, List[Overlap]]) -> bool:
+    return False
+def remove_overlap(overlap: Overlap) -> bool:
     if (overlap.qlen - (overlap.qend - overlap.qstart)) <= DOUBLE_OL_THRESHOLD:
         return False  # Query covered completely
 
@@ -138,16 +137,6 @@ def remove_overlap(overlap: Overlap,
     if overlap.tstart > OL_THRESHOLD and qstart <= OL_THRESHOLD and (
             overlap.tlen - overlap.tend) <= OL_THRESHOLD:
         return False  # Suffix overlap between query and target
-
-    try:
-        for o in true_overlaps[overlap.tname]:
-            if o.qname == overlap.qname:
-                return True
-                '''print(overlap)
-                print(o)
-                print('Invalid overlap\n')'''
-    except KeyError:
-        pass
 
     return True
 
@@ -256,7 +245,58 @@ def main(args: argparse.Namespace) -> None:
             f.write(f'{read.seq}\n')
     print('Number of written reads:', len(reads))
 
+def load_overlaps(paf_path:str):
+    
+    print('Parsing inputs...')
+    time1 = time.time()
+    # parse the overlaps
+    overlaps = parse_paf(paf_path)
+    overlaps = filter_primary_overlaps(overlaps)
+    valid_overlaps = {}
+    for name, ovlps in overlaps.items():
+        valid = []
+        for o in ovlps:
+            remove = remove_overlap_ratio(o)
+            if not remove:
+                valid.append(o)
 
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+    overlaps = valid_overlaps
+    extend_overlaps(overlaps)
+    # overlaps = take_longest(overlaps)
+    time2 = time.time()
+    print("finish parsing")
+    covs = [len(olps) for olps in overlaps.values()]
+    covs.sort()
+    print('Median number of overlaps:', covs[len(covs) // 2])
+    print(f'Total number of overlaps: {sum(covs)}')    
+    
+    
+    valid_overlaps = {}
+    n_valid, n_invalid = 0, 0
+    for name, ovlps in overlaps.items():
+        valid = []
+        # valid = [o for o in ovlps if not remove_overlap(o)]
+        for o in ovlps:
+            remove = remove_overlap(o)
+            if not remove:
+                valid.append(o)
+
+        if len(valid) > 0:
+            valid_overlaps[name] = valid
+
+        n_valid += len(valid)
+        n_invalid += len(ovlps) - len(valid)
+        
+    print(f'Valid overlaps: {n_valid}, invalid overlaps: {n_invalid}')
+    overlaps = valid_overlaps
+    
+    
+    print(f'Time taken for processing overlaps : {time2 - time1}')
+    
+    return overlaps
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
