@@ -229,29 +229,20 @@ def trim_and_split_reads(
     return filtered_reads
 
 
-def main(args: argparse.Namespace) -> None:
-    reads = get_reads(args.reads)
-    print('Number of reads:', len(reads))
 
-    overlaps = parse_paf(args.paf)
-    print('Number of overlaps:', sum([len(o) for o in overlaps.values()]))
 
-    overlaps = filter_primary_overlaps(overlaps)
-    reads = trim_and_split_reads(reads, overlaps)
-
-    with open(args.output, 'w') as f:
-        for read in reads:
-            f.write(f'>{read.id} {read.description}\n')
-            f.write(f'{read.seq}\n')
-    print('Number of written reads:', len(reads))
-
-def load_overlaps(paf_path:str):
+def load_overlaps(paf_path:str)->Dict[str, List[Overlap]]:
     
     print('Parsing inputs...')
     time1 = time.time()
     # parse the overlaps
     overlaps = parse_paf(paf_path)
     overlaps = filter_primary_overlaps(overlaps)
+    
+    # IMPORTANT
+    
+
+    
     valid_overlaps = {}
     for name, ovlps in overlaps.items():
         valid = []
@@ -264,6 +255,7 @@ def load_overlaps(paf_path:str):
             valid_overlaps[name] = valid
 
     overlaps = valid_overlaps
+    
     extend_overlaps(overlaps)
     # overlaps = take_longest(overlaps)
     time2 = time.time()
@@ -274,6 +266,8 @@ def load_overlaps(paf_path:str):
     print(f'Total number of overlaps: {sum(covs)}')    
     
     
+    
+    # IMPORTANT
     valid_overlaps = {}
     n_valid, n_invalid = 0, 0
     for name, ovlps in overlaps.items():
@@ -297,6 +291,24 @@ def load_overlaps(paf_path:str):
     print(f'Time taken for processing overlaps : {time2 - time1}')
     
     return overlaps
+
+def main(args: argparse.Namespace) -> None:
+    reads = get_reads(args.reads)
+    print('Number of reads:', len(reads))
+
+    overlaps = parse_paf(args.paf)
+    print('Number of overlaps:', sum([len(o) for o in overlaps.values()]))
+
+    overlaps = filter_primary_overlaps(overlaps)
+    reads = trim_and_split_reads(reads, overlaps)
+
+    with open(args.output, 'w') as f:
+        for read in reads:
+            f.write(f'>{read.id} {read.description}\n')
+            f.write(f'{read.seq}\n')
+    print('Number of written reads:', len(reads))
+
+
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 

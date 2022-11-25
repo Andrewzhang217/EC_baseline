@@ -163,8 +163,14 @@ def generate_consensus(uncorrected, freq):
 
     # print("insert" , insertions, dels)
     return corrected
-
-
+def generate_cigar(overlaps: Dict[str, List[Overlap]],
+                   reads: Dict[str, HAECSeqRecord]) -> None:
+    for tname, tovlps in overlaps.items():
+        for overlap in tovlps:
+            cigar = calculate_path(overlap, reads[tname], reads[overlap.qname])
+            if cigar is not None:
+                overlap.cigar = cigar
+'''
 def generate_cigar(overlaps: Dict[str, List[Overlap]],
                    reads: Dict[str, HAECSeqRecord]) -> None:
     cnt = 0
@@ -189,6 +195,7 @@ def generate_cigar(overlaps: Dict[str, List[Overlap]],
             # cigar_list[query_name].append(reverse_cigar)
         # if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
         #    print('Aln counts:', len(tovlps), count)
+'''
 def trim_overlaps_cigar(
         cigar: List[Tuple[str, int]]) -> Tuple[int, int, int, int]:
     qstart_trim, tstart_trim = 0, 0

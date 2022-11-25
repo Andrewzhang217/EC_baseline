@@ -35,7 +35,7 @@ TODO use smaller dtype
 '''
 
 #COV = int(1.2 * 35)
-#COV = 30
+COV = 30 # 
 get_bases_in_order = itemgetter('A', 'C', 'G', 'T', 'D')
 
 encode = {
@@ -61,7 +61,7 @@ def calculate_iden(cigar):
         else:
             ValueError('Invalid CIGAR')
 
-    return matches / (matches + mis + ins + dels)
+    return matches / (matches + mis) # + ins + dels) # IMPORTANT
 
 
 class aux_data:
@@ -121,6 +121,17 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     # TODO check usefulness
     # temp_lst = []
     
+    # IMPORTANT
+    '''
+    
+    if len(tovlps) >= COV:
+        tovlps.sort(key=lambda o: calculate_iden(o.cigar), reverse=True)
+        temp_lst = tovlps[:COV]
+    else:
+        temp_lst = tovlps
+    tovlps = temp_lst
+    '''
+    
     '''tovlps = [o for o in tovlps if calculate_iden(o.cigar) >= 0.9]
 
     k = int(N_OVERLAPS * len(reads[tname].seq))
@@ -133,7 +144,7 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     else:
         temp_lst = tovlps
     tovlps = temp_lst'''
-
+    
     # freq of A C G T and D at each base
     for overlap in tovlps:
         # sr = SeqRecord(reads[query_name].seq)
@@ -194,8 +205,15 @@ def get_bases_freq(reads: Dict[str, HAECSeqRecord], tname: str,
     
     return freq, aux_data(tname, ins_counts, total_num_pos), get_original_bases(uncorrected, ins_counts)
     
+def generate_cigar(overlaps: Dict[str, List[Overlap]],
+                   reads: Dict[str, HAECSeqRecord]) -> None:
+    for tname, tovlps in overlaps.items():
+        for overlap in tovlps:
+            cigar = calculate_path(overlap, reads[tname], reads[overlap.qname])
+            if cigar is not None:
+                overlap.cigar = cigar
 
-
+'''
 def generate_cigar(overlaps: Dict[str, List[Overlap]],
                    reads: Dict[str, HAECSeqRecord]) -> None:
     cnt = 0
@@ -221,6 +239,7 @@ def generate_cigar(overlaps: Dict[str, List[Overlap]],
             # cigar_list[query_name].append(reverse_cigar)
         # if tname == 'e012f204-6a49-4e82-884e-8138929a86c9_1':
         #    print('Aln counts:', len(tovlps), count)
+'''
 def trim_overlaps_cigar(
         cigar: List[Tuple[str, int]]) -> Tuple[int, int, int, int]:
     qstart_trim, tstart_trim = 0, 0
@@ -270,6 +289,10 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
 
     generator = gen(path)
     cigar = list(generator)
+    
+    #IMPORTANT
+    
+    
     qstart_trim, qend_trim, tstart_trim, tend_trim = trim_overlaps_cigar(cigar)
 
     # Trim query
@@ -283,9 +306,10 @@ def calculate_path(overlap: Overlap, trecord: HAECSeqRecord,
     # Trim target
     overlap.tstart += tstart_trim
     overlap.tend -= tend_trim
-
+    
     if len(cigar) == 0:
         return None
+    
     return cigar
 
 
