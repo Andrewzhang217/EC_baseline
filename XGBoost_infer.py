@@ -14,6 +14,7 @@ import xgboost as xgb
 import numpy as np
 from overlaps import *
 import time
+import globals
 decoder = {
     0 : 'A',
     1 : 'C',
@@ -36,9 +37,9 @@ def construct_sequences(prediction_array, aux_data_list:aux_data):
     starts = list(np.cumsum([aux.num_pos for aux in aux_data_list]))
     starts = [0] + starts[:-1]
     sequences = [SeqRecord(Seq(stitch_sequence(prediction_array, start, start + aux.num_pos)),
-                    id=reads[aux.tname].id,
-                    name=reads[aux.tname].name,
-                    description=reads[aux.tname].description)
+                    id=globals.reads[aux.tname].id,
+                    name=globals.reads[aux.tname].name,
+                    description=globals.reads[aux.tname].description)
                     for start, aux in zip(starts, aux_data_list)]
     
     return sequences
@@ -51,17 +52,15 @@ Generate features for the given dict of target reads and overlaps and use the gi
 Returns the corrected reads for the batch.
 '''
 def generate_features_and_infer(overlaps: dict[str, list[Overlap]]):  
-    global reads
-    global xgb_model
-    
+
     '''
     batch_input_features is (n, 5) np array
     '''
-    batch_input_features, aux_data_list = generate_input_features(reads, overlaps)
+    batch_input_features, aux_data_list = generate_input_features(globals.reads, overlaps)
     batch_input_features = xgb.DMatrix(data=batch_input_features)
     
     # 1-d contiguous array of predictions
-    pred = xgb_model.predict(batch_input_features)
+    pred = globals.xgb_model.predict(batch_input_features)
     pred = np.asarray([np.argmax(logit) for logit in pred])
 
     # construct sequences from predictions
@@ -76,38 +75,14 @@ reads to files.
 '''
 def do_inference(model_path:str, paf_path:str, reads_path:str, output_path:str, num_proc:int):
     
-    #TODO refactor the input reading part into one function or sth
-    print('Parsing inputs...')
-    time1 = time.time()
-    # parse the overlaps
-    overlaps = parse_paf(paf_path)
-    overlaps = filter_primary_overlaps(overlaps)
-    extend_overlaps(overlaps)
-    # overlaps = take_longest(overlaps)
-    time2 = time.time()
-    print(f'Time taken for parsing overlaps : {time2 - time1}')
+    overlaps = load_overlaps(paf_path)
+    globals.parse_input_reads(reads_path)
+    globals.load_xgb_model(model_path)
 
-    # Parse the reads and make them globally accessible
-    global reads 
-    time3 = time.time()
-    reads = get_reads(reads_path)
-    time4 = time.time()
-    print(f'Time taken for parsing reads : {time4 - time3}')
-
-
-    print("finish parsing")
-    covs = [len(olps) for olps in overlaps.values()]
-    covs.sort()
-    print('Median number of overlaps:', covs[len(covs) // 2])
 
     overlap_keys = list(overlaps)
     overlap_list = overlaps.items()
     
-    # loads and make model global (maybe it can be large?)
-    global xgb_model 
-    xgb_model = xgb.Booster(model_file=model_path)
-    #xgb_model._Booster.set_param('n_jobs', 1)
-
     futures_corrected_reads = []
 
     time5 = time.time()

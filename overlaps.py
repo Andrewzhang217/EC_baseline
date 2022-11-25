@@ -10,10 +10,11 @@ import sys
 from sequences import *
 
 from typing import *
-
+import time
 COV_WINDOW_SIZE = 16
 OL_THRESHOLD = 1
 DOUBLE_OL_THRESHOLD = 2 * OL_THRESHOLD
+EXTENSION_BP = 200
 
 
 @dataclass
@@ -85,10 +86,10 @@ def filter_primary_overlaps(
 def extend_overlaps(overlaps: Dict[str, List[Overlap]]) -> None:
     for ovlps in tqdm(overlaps.values(), 'Extending overlaps'):
         for o in ovlps:
-            o.qstart = max(o.qstart - 200, 0)
-            o.qend = min(o.qend + 200, o.qlen)
-            o.tstart = max(o.tstart - 200, 0)
-            o.tend = min(o.tend + 200, o.tlen)
+            o.qstart = max(o.qstart - EXTENSION_BP, 0)
+            o.qend = min(o.qend + EXTENSION_BP, o.qlen)
+            o.tstart = max(o.tstart - EXTENSION_BP, 0)
+            o.tend = min(o.tend + EXTENSION_BP, o.tlen)
 
 
 def remove_overlap(overlap: Overlap) -> bool:
@@ -227,7 +228,23 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('-o', '--output', type=str, required=True)
 
     return parser.parse_args()
-
+def load_overlaps(paf_path:str)->Dict[str, List[Overlap]]:
+    
+    print('Parsing inputs...')
+    time1 = time.time()
+    overlaps = parse_paf(paf_path)
+    overlaps = filter_primary_overlaps(overlaps)
+    extend_overlaps(overlaps)
+    # overlaps = take_longest(overlaps)
+    time2 = time.time()
+    print(f'Time taken for parsing paf: {time2-time1}')
+    covs = [len(olps) for olps in overlaps.values()]
+    covs.sort()
+    print('Median number of overlaps:', covs[len(covs) // 2])
+    
+    
+    
+    return overlaps
 
 if __name__ == '__main__':
     args = get_arguments()
