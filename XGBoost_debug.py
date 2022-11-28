@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-from globals import parse_input_reads, load_xgb_model
+from globals import parse_input_reads, load_xgb_model, parse_truth_reads
 import globals
 from overlaps import load_overlaps, Overlap
 from typing import *
-from XGBoost_features import generate_input_features, aux_data
+from XGBoost_features import generate_input_features, aux_data, ground_truth_for_read, LABELS_TYPE
 import numpy as np
 from XGBoost_infer import construct_sequences
 import xgboost as xgb
@@ -16,14 +16,16 @@ Functions to:
 3. generate input features for a specific read (by id)
 4. use model to get prediction and construct sequence from it 
 
+5. also return the ground-truth to compare if given (no tested)
 ---------------------------------------
-TODO
-5. also return the ground-truth to compare 
+TODO?
 6. Get the list of overlapping reads to a target and print an alignment?
 '''
 
-def initialize(reads_path:str, paf_path:str, model_path:str)->Dict[str, List[Overlap]]:
+def initialize(reads_path:str, paf_path:str, model_path:str, truth_path:str=None)->Dict[str, List[Overlap]]:
     parse_input_reads(reads_path)
+    if truth_path:
+        parse_truth_reads(truth_path)
     load_xgb_model(model_path)
     return load_overlaps(paf_path)
 
@@ -31,6 +33,9 @@ def generate_features_for_read(read_id:str, overlaps:Dict[str, List[Overlap]])->
     one_item_dict = {read_id:overlaps[read_id]}
     input_features, aux_data_list = generate_input_features(globals.reads, one_item_dict)
     return input_features, aux_data_list[0]
+
+def generate_ground_truth(aux:aux_data)->np.ndarray:
+    return np.array(ground_truth_for_read(aux), LABELS_TYPE)
 
 def predict_and_construct_sequence(input_features:np.ndarray, aux:aux_data)->SeqRecord:
     input_features = xgb.DMatrix(data=input_features)

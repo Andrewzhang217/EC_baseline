@@ -13,6 +13,19 @@ LABELS_SUFFIX = 'LABELS'
 
 AUX_SUFFIX = 'AUX'
 
+'''
+Each batch of input features(a single ndarray) + aux_data + optionally ground-truth(single ndarray) 
+is written to a file under a 'key' value with which it can be retrieved. 
+
+currently the training features are generated and accumulated into a single large batch and then used for training. 
+In this case it can be stored under a hardcoded fixed key.
+
+The inference features (without the ground-truth) is consumed (used for inference) in batches, hence it makes 
+sense to store them into separate batches where each process deals with one batch to produce corrected reads for that batch. 
+So if we want to store inference features, I think need to add a function to return a list of all 'keys' or something. 
+But I think maybe there is no/less need to store inference features?  
+
+'''
 def aux_data_to_array(auxiliary_data:List[aux_data])->np.ndarray:
     num_pos_with_ins_counts = [[len(aux.ins_counts)] + aux.ins_counts for aux in auxiliary_data]
     flattened = [item for sublist in num_pos_with_ins_counts for item in sublist]    
